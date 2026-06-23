@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Données runtime (NE PAS versionner — change à chaque test, propre à la machine)
+fxs_tests.db
+*.db-journal
+*.db-wal
+
+# Logs / divers
+*.log
+.DS_Store
+Thumbs.db
+
+# NB volontairement VERSIONNÉS (nécessaires au déploiement) :
+#   - fxs_iso.joblib      (modèle IA chargé par fxs_ai)
+#   - fxs_train_normal.csv (données d'entraînement / régénération du modèle)
+#   - .env                (config FXS_GW_URL — IP LAN, pas un secret)

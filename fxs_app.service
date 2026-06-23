@@ -1,0 +1,38 @@
+# systemd unit — superviseur FXS (notre app Flask)
+# ----------------------------------------------------------------------------
+# Installation sur le Pi :
+#   sudo cp /home/pi/deploy_test_final/fxs_app.service /etc/systemd/system/fxs_app.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fxs_app
+# Logs :   journalctl -u fxs_app -f
+# Stop :   sudo systemctl stop fxs_app   (À FAIRE avant de lancer LabVIEW : les
+#          deux pilotent les mêmes GPIO/I2C, ne jamais tourner en parallèle.)
+# ----------------------------------------------------------------------------
+
+[Unit]
+Description=FXS Test Bench - superviseur Flask (app.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/deploy_test_final
+ExecStart=/usr/bin/python3 /home/pi/deploy_test_final/app.py
+Restart=on-failure
+RestartSec=5
+# Sortie non bufferisée -> logs lisibles en temps réel dans journalctl
+Environment=PYTHONUNBUFFERED=1
+# raspi-gpio / python doivent être trouvables depuis l'environnement systemd
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Sonnerie DÉPORTÉE sur le PC (station TF : Pi figé, gateway change par unité).
+# IP du PC qui fait tourner gateway_server.py. RÉSERVER une IP fixe au PC : si
+# elle change (DHCP), mettre cette ligne à jour. Commenter -> Telnet local (Pi).
+Environment=FXS_GW_URL=http://192.168.100.50:5050
+
+# NB : si "raspi-gpio set ..." renvoie une erreur de permission sous l'utilisateur
+# pi, soit ajouter l'utilisateur aux droits GPIO, soit (plus simple sur banc dédié)
+# passer la ligne ci-dessus à : User=root
+
+[Install]
+WantedBy=multi-user.target

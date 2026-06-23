@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FXS Test Bench - Banc de Test Industriel</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* Dual-port layout (FXS1 / FXS2) */
+    .port-row { display:flex; align-items:center; gap:10px; margin:8px 0; }
+    .port-tag { font-weight:700; font-size:11px; letter-spacing:.5px;
+                padding:2px 8px; border-radius:4px; background:rgba(255,255,255,.08);
+                min-width:46px; text-align:center; }
+    .port-row .bar-gauge { flex:1; }
+    .port-row .gauge-value { min-width:92px; text-align:right; }
+    .trans-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .trans-table th { text-align:center; font-weight:600; opacity:.6; font-size:11px;
+                      padding:4px 6px; }
+    .trans-table td { text-align:center; padding:6px; }
+    .trans-table td.pass { color:var(--pass-green,#2ecc71); }
+    .trans-table td.fail { color:var(--fail-red,#e74c3c); }
+    /* Mesures effectuées : témoin d'avancement (allumé = mesure faite) */
+    .done-grid { display:flex; flex-direction:column; gap:10px; }
+    .done-port-row { display:flex; align-items:center; gap:14px; }
+    .done-port-tag { font-weight:700; font-size:11px; letter-spacing:.5px; min-width:46px; opacity:.7; }
+    .done-leds { display:flex; gap:18px; flex:1; }
+    .done-led { display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .done-dot { width:16px; height:16px; border-radius:50%; border:2px solid #44506a;
+                background:transparent; transition:all .2s; }
+    .done-dot.on  { border-color:currentColor; background:currentColor;
+                    box-shadow:0 0 8px currentColor; }
+    .done-dot.active { border-color:currentColor; opacity:.5; }
+    .done-led-label { font-size:9px; opacity:.65; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════ HEADER ══════════════════ -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">FXS</div>
+    <div class="header-title">
+      <h1>Banc de Test FXS</h1>
+      <span>Raspberry Pi 4 &bull; ADS1115 &bull; AD736 &bull; BS2</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="statusBadge" class="status-badge status-idle">IDLE</span>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- ══════════════════ CONTROLS ══════════════════ -->
+<div class="controls">
+  <button class="btn btn-start" id="btnStart" onclick="startTest()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="5,3 19,12 5,21"/>
+    </svg>
+    Demarrer Test
+  </button>
+  <button class="btn btn-reset" id="btnReset" onclick="resetTest()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M1 4v6h6M23 20v-6h-6"/>
+      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+    </svg>
+    Reset
+  </button>
+</div>
+
+<!-- ══════════════════ PROGRESS ══════════════════ -->
+<div class="progress-section">
+  <div class="progress-bar-bg">
+    <div class="progress-bar-fill" id="progressBar"></div>
+  </div>
+  <div class="progress-label" id="progressLabel">En attente</div>
+</div>
+
+<!-- ══════════════════ MAIN GRID ══════════════════ -->
+<div class="main">
+
+  <!-- ════ Bandeau gateway / slot ════ -->
+  <div class="card card-full" style="padding:6px 14px">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px">
+      <span style="font-weight:700">Gateway — Slot <span id="slotNum">1</span></span>
+      <span style="opacity:.7; font-size:12px">2 ports FXS testés simultanément • verdict IA par gateway</span>
+    </div>
+  </div>
+
+  <!-- ── 1. Tension de Repos (FXS1 / FXS2) ── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>1. Tension de Repos</h2>
+      <span class="gauge-range">[44 - 50] V</span>
+    </div>
+    <div class="card-body">
+      <div class="port-row">
+        <span class="port-tag">FXS1</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_tr_fxs1" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_tr_fxs1">---<span class="gauge-unit"> V</span></span>
+        <span class="step-result" id="res_tr_fxs1">--</span>
+      </div>
+      <div class="port-row">
+        <span class="port-tag">FXS2</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_tr_fxs2" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_tr_fxs2">---<span class="gauge-unit"> V</span></span>
+        <span class="step-result" id="res_tr_fxs2">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. Courant de Ligne (FXS1 / FXS2) ── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>2. Courant de Ligne</h2>
+      <span class="gauge-range">[33 - 39] mA</span>
+    </div>
+    <div class="card-body">
+      <div class="port-row">
+        <span class="port-tag">FXS1</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_cl_fxs1" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_cl_fxs1">---<span class="gauge-unit"> mA</span></span>
+        <span class="step-result" id="res_cl_fxs1">--</span>
+      </div>
+      <div class="port-row">
+        <span class="port-tag">FXS2</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_cl_fxs2" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_cl_fxs2">---<span class="gauge-unit"> mA</span></span>
+        <span class="step-result" id="res_cl_fxs2">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Sonnerie (FXS1 / FXS2) ── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>3. Sonnerie (Ring)</h2>
+      <span class="gauge-range">[35 - 41] Vrms</span>
+    </div>
+    <div class="card-body">
+      <div class="port-row">
+        <span class="port-tag">FXS1</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_alarm_fxs1" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_alarm_fxs1">---<span class="gauge-unit"> Vrms</span></span>
+        <span class="step-result" id="res_alarm_fxs1">--</span>
+      </div>
+      <div class="port-row">
+        <span class="port-tag">FXS2</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_alarm_fxs2" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_alarm_fxs2">---<span class="gauge-unit"> Vrms</span></span>
+        <span class="step-result" id="res_alarm_fxs2">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Transmission (FXS1 / FXS2, 300/1000/3400 Hz) ── -->
+  <div class="card card-full">
+    <div class="card-header">
+      <h2>4. Transmission (atténuation)</h2>
+      <span class="gauge-range">1000 Hz : [8.1 - 10.1] dB</span>
+    </div>
+    <div class="card-body">
+      <table class="trans-table">
+        <thead>
+          <tr><th>Port</th><th>300 Hz</th><th>1000 Hz</th><th>3400 Hz</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="port-tag">FXS1</td>
+            <td id="val_trans_300_fxs1">---</td>
+            <td id="val_trans_1000_fxs1">---</td>
+            <td id="val_trans_3400_fxs1">---</td>
+            <td><span class="step-result" id="res_trans_fxs1">--</span></td>
+          </tr>
+          <tr>
+            <td class="port-tag">FXS2</td>
+            <td id="val_trans_300_fxs2">---</td>
+            <td id="val_trans_1000_fxs2">---</td>
+            <td id="val_trans_3400_fxs2">---</td>
+            <td><span class="step-result" id="res_trans_fxs2">--</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="opacity:.6; font-size:11px; margin-top:6px">
+        Le seuil PASS/FAIL porte sur le 1000 Hz (spec Sagem). 300/3400 Hz affichés pour information.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 5. Consommation (niveau gateway, INA219) ── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>5. Consommation</h2>
+      <span class="gauge-range">[7 - 20] W</span>
+    </div>
+    <div class="card-body">
+      <div class="port-row">
+        <span class="port-tag">GW</span>
+        <div class="bar-gauge"><div class="bar-gauge-fill" id="bar_conso" style="width:0%"></div></div>
+        <span class="gauge-value" id="val_conso">---<span class="gauge-unit"> W</span></span>
+        <span class="step-result" id="res_conso">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Sequence de Test ── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Sequence de Test</h2>
+    </div>
+    <div class="card-body">
+      <div class="steps-list">
+        <div class="step-item" id="step1">
+          <div class="step-num">1</div>
+          <span class="step-text">Tension de repos</span>
+          <span class="step-result" id="step1_res"></span>
+        </div>
+        <div class="step-item" id="step2">
+          <div class="step-num">2</div>
+          <span class="step-text">Courant de ligne</span>
+          <span class="step-result" id="step2_res"></span>
+        </div>
+        <div class="step-item" id="step3">
+          <div class="step-num">3</div>
+          <span class="step-text">Sonnerie</span>
+          <span class="step-result" id="step3_res"></span>
+        </div>
+        <div class="step-item" id="step4">
+          <div class="step-num">4</div>
+          <span class="step-text">Transmission</span>
+          <span class="step-result" id="step4_res"></span>
+        </div>
+        <div class="step-item" id="step5">
+          <div class="step-num">5</div>
+          <span class="step-text">Consommation</span>
+          <span class="step-result" id="step5_res"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Mesures effectuées (témoin logiciel d'avancement) ── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Mesures effectuees</h2>
+      <span class="gauge-range" id="doneCount">allume = faite &bull; 0/8</span>
+    </div>
+    <div class="card-body">
+      <div class="done-grid" id="doneGrid"><!-- rempli par dashboard.js --></div>
+    </div>
+  </div>
+
+  <!-- ── Final Result ── -->
+  <div class="final-result" id="finalResult">
+    <div class="final-text idle" id="finalText">EN ATTENTE</div>
+    <div class="final-sub" id="finalSub">
+      Appuyez sur DEMARRER pour lancer la sequence
+    </div>
+  </div>
+
+  <!-- ── Verdict IA ── -->
+  <div class="card card-full" id="aiCard">
+    <div class="card-header">
+      <h2>Analyse IA &bull; Detection de derive (Isolation Forest)</h2>
+      <div class="indicator" id="ind_ai"></div>
+    </div>
+    <div class="card-body">
+      <div class="gauge-row">
+        <span class="gauge-label">Verdict</span>
+        <span class="gauge-value" id="ai_verdict" style="font-size:18px">En attente</span>
+      </div>
+      <div class="gauge-row">
+        <span class="gauge-label">Severite</span>
+        <span class="gauge-value" id="ai_severity" style="font-size:16px; font-weight:800">--</span>
+      </div>
+      <div class="gauge-row" id="ai_margin_row">
+        <span class="gauge-label">Marge mini au seuil</span>
+        <span class="gauge-value" id="ai_margin">---</span>
+      </div>
+      <div class="gauge-row" id="ai_score_row">
+        <span class="gauge-label">Score anomalie</span>
+        <span class="gauge-value" id="ai_score">---</span>
+        <span class="gauge-range" id="ai_threshold"></span>
+      </div>
+      <div class="gauge-row" id="ai_culprit_row">
+        <span class="gauge-label">Cause probable</span>
+        <span class="gauge-value" id="ai_culprit">---</span>
+      </div>
+      <div class="gauge-row" style="flex-direction:column; align-items:flex-start; gap:4px">
+        <span class="gauge-label" id="ai_reco_label">Recommandation maintenance</span>
+        <span class="gauge-range" id="ai_note" style="font-size:11px"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Historique ── -->
+  <div class="card card-full">
+    <div class="card-header">
+      <h2>Historique des Tests</h2>
+    </div>
+    <div class="card-body" style="max-height:250px; overflow-y:auto;">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Date/Heure</th>
+            <th>TR (V)</th>
+            <th>CL (mA)</th>
+            <th>Puissance</th>
+            <th>Sonnerie</th>
+            <th>Audio 1k (dB)</th>
+            <th>IA</th>
+            <th>Resultat</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════ FOOTER ══════════════════ -->
+<div class="footer">
+  Banc de Test FXS &bull; Raspberry Pi 4 &bull; PFE 2026 &bull;
+  Interface de Supervision Industrielle
+</div>
+
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
