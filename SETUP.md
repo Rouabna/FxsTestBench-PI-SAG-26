@@ -28,12 +28,19 @@ Pour l'historique détaillé des modifications, voir [SESSION_LOG.md](SESSION_LO
 | Machine / interface | IP | Rôle |
 |---|---|---|
 | **Pi** `eth0` | `192.168.100.10/24` | dashboard + mesures (IP statique) |
+| **PC** `Wi-Fi` | `10.235.225.56/24` ✅ **statique** | pont (`bridge.js`) vers le Pi pour le téléphone |
 | **PC** `Ethernet` | `192.168.100.50/24` | lien vers le Pi + `gateway_server` |
 | **PC** `Ethernet 2` | `192.168.5.100/24` | lien vers le gateway (DUT) |
 | **Gateway (DUT)** | `192.168.5.1` | cible Telnet `scos-voice` |
 
 > Le Pi et le PC sont sur `192.168.100.0/24`. Le PC et le gateway sont sur `192.168.5.0/24`.
 > Le PC fait le pont entre les deux (il a une carte sur chaque réseau).
+>
+> **IP Wi-Fi du PC fixée (2026-06-26)** : `10.235.225.56/24`, passerelle/DNS `10.235.225.157`,
+> DHCP désactivé sur le Wi-Fi (adaptateur « Wi-Fi », MAC `74-12-B3-93-F5-77`). L'app mobile
+> (`config.js`) et `bridge.js` pointent déjà sur cette adresse → elle ne changera plus au reboot.
+> Revenir en DHCP (si le PC change de réseau Wi-Fi) :
+> `netsh interface ip set address name="Wi-Fi" dhcp` + `netsh interface ip set dns name="Wi-Fi" dhcp` (admin).
 
 **URLs :**
 - Dashboard (à ouvrir dans le navigateur du PC) : **http://192.168.100.10:5000**
@@ -56,12 +63,18 @@ sudo systemctl start   fxs_app
 journalctl -u fxs_app -f           # logs en direct (q pour quitter)
 ```
 
-### PC — `gateway_server.py`
-Lancé automatiquement à l'ouverture de session Windows via un raccourci :
-- Script : `run_gateway_server.bat` (utilise `C:\Python313\python.exe`)
-- Raccourci : `…\Startup\GatewayServer.lnk` (dossier `Win+R → shell:startup`)
+### PC — `gateway_server.py` + `bridge.js`
+Deux services lancés automatiquement à l'ouverture de session Windows via des raccourcis
+dans le dossier de démarrage (`Win+R → shell:startup`) :
 
-Pour lancer/relancer manuellement : double-clic sur `run_gateway_server.bat`.
+| Service | Script | Raccourci | Port | Rôle |
+|---|---|---|---|---|
+| **Serveur gateway** | `run_gateway_server.bat` (`C:\Python313\python.exe`) | `…\Startup\GatewayServer.lnk` | 5050 | Telnet vers le DUT |
+| **Pont téléphone** ✅ | `run_bridge.bat` (`C:\nvm4w\nodejs\node.exe`) | `…\Startup\FxsBridge.lnk` | 5000 | relais Wi-Fi → Pi (téléphone) |
+
+> `bridge.js` ajouté au démarrage auto le **2026-06-26** : sans lui, le téléphone ne joint
+> pas le Pi après un reboot du PC. Lancement manuel : double-clic sur le `.bat` correspondant
+> (`run_gateway_server.bat` dans `deploy_test_final/`, `run_bridge.bat` dans `fxs-mobile/`).
 
 ---
 
